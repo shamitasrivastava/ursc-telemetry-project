@@ -1,0 +1,34 @@
+# ==========================================
+# ISRO DATASETS, LOGS & REPORTS TO IGNORE
+# ==========================================
+*.csv
+*.json
+*.parquet
+*.h5
+*.tst
+logs/
+data/
+raw_data/
+dataset/
+datasets/
+isro_reports/
+
+# ==========================================
+# MODEL WEIGHTS & CHECKPOINTS TO IGNORE
+# ==========================================
+*.pt
+*.pth
+*.onnx
+*.pkl
+
+# ==========================================
+# SYSTEM & ENVIRONMENT FILES TO IGNORE
+# ==========================================
+.env
+.DS_Store
+__pycache__/
+*.pyc
+.vscode/
+.idea/
+venv/
+env/
