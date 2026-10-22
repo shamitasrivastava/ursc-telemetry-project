@@ -10,11 +10,77 @@ import plotly.graph_objects as go
 
 st.set_page_config(
     page_title="URSC Telemetry & Command Operations",
-    page_icon=None,
+    page_icon="📡",
     layout="wide"
 )
 
-st.title("URSC Dynamic Telemetry & Command Operations")
+# --- ASTRO UXDS DARK NAVY THEME INJECTION ---
+st.markdown("""
+    <style>
+    /* Dark Slate Navy Background matching Astro UXDS */
+    .stApp {
+        background-color: #0b131f !important;
+        color: #d1d5db !important;
+        font-family: 'Consolas', 'Monaco', monospace !important;
+    }
+
+    /* Sidebar Styling */
+    section[data-testid="stSidebar"] {
+        background-color: #101c2c !important;
+        border-right: 1px solid #1e2d42 !important;
+    }
+    
+    /* Input Boxes & Text Elements */
+    .stTextInput input, .stSelectbox select {
+        background-color: #0b131f !important;
+        color: #38bdf8 !important;
+        border: 1px solid #1e2d42 !important;
+    }
+
+    /* Fix metric box height and allow full text display without truncation */
+    div[data-testid="stMetric"] {
+        background-color: #101c2c !important;
+        border: 1px solid #1e2d42 !important;
+        padding: 12px 15px !important;
+        border-radius: 4px;
+        min-height: 95px !important;
+    }
+    
+    /* Ensure metric value text wraps or scales down slightly to fit long status strings */
+    div[data-testid="stMetricValue"] {
+        color: #38bdf8 !important;
+        font-size: 22px !important;
+        font-weight: bold;
+        white-space: normal !important;
+        word-break: break-word !important;
+    }
+
+    /* Dataframe & Table Styling */
+    .stDataFrame {
+        border: 1px solid #1e2d42 !important;
+        border-radius: 4px;
+    }
+    
+    table {
+        color: #e2e8f0 !important;
+        background-color: #0b131f !important;
+    }
+
+    th {
+        background-color: #101c2c !important;
+        color: #94a3b8 !important;
+    }
+
+    /* Success / Info Banners */
+    .stSuccess {
+        background-color: #064e3b !important;
+        color: #6ee7b7 !important;
+        border: 1px solid #047857 !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+st.title("Telemetry & Command Operations")
 st.markdown("---")
 
 # --- CACHED DATA LOADER FOR REAL TELEMETRY ---
@@ -91,6 +157,16 @@ elif page == "Real-Time Reconstruction & Anomaly View":
   if os.path.exists(log_path) and "Autoencoder_MSE" in audit_df.columns:
     fig, ax = plt.subplots(figsize=(10, 4))
     
+    # Styling matplotlib background to match dark navy
+    fig.patch.set_facecolor('#0b131f')
+    ax.set_facecolor('#101c2c')
+    ax.tick_params(colors='#94a3b8')
+    ax.xaxis.label.set_color('#d1d5db')
+    ax.yaxis.label.set_color('#d1d5db')
+    ax.title.set_color('#ffffff')
+    for spine in ax.spines.values():
+        spine.set_edgecolor('#1e2d42')
+    
     mse_values = audit_df["Autoencoder_MSE"].values
     steps = range(len(mse_values))
     
@@ -98,17 +174,17 @@ elif page == "Real-Time Reconstruction & Anomaly View":
     std_mse = np.std(mse_values)
     dyn_thresh = mean_mse + (3.0 * std_mse) if std_mse > 0 else 15.0
 
-    colors = ['crimson' if val > dyn_thresh else 'royalblue' for val in mse_values]
+    colors = ['crimson' if val > dyn_thresh else '#38bdf8' for val in mse_values]
     
-    ax.plot(steps, mse_values, color='gray', linestyle='-', alpha=0.5, label='Reconstruction MSE Trajectory')
+    ax.plot(steps, mse_values, color='#64748b', linestyle='-', alpha=0.5, label='Reconstruction MSE Trajectory')
     ax.scatter(steps, mse_values, c=colors, s=50, zorder=3, label='Command Execution Point')
     ax.axhline(dyn_thresh, color='red', linestyle='--', linewidth=2, label=f'Adaptive Threshold (Mean + 3σ: {dyn_thresh:.3f})')
     
     ax.set_title("Terminal Telecommand Anomaly Audit (MSE Loss Corridor)")
     ax.set_xlabel("Telecommand Execution Sequence Index")
     ax.set_ylabel("Mean Squared Error (MSE)")
-    ax.grid(True, alpha=0.3)
-    ax.legend(loc='upper right')
+    ax.grid(True, alpha=0.2, color='#1e2d42')
+    ax.legend(loc='upper right', facecolor='#101c2c', edgecolor='#1e2d42', labelcolor='#d1d5db')
     
     st.pyplot(fig)
     st.success("Chart enhanced: Showing safety corridors and dynamic threshold boundaries.")
@@ -133,11 +209,20 @@ elif page == "Subsystem Correlation & Parameter Analysis":
     selected_col = st.selectbox("Select Parameter to Plot", numeric_df.columns[:20])
     if selected_col:
       fig, ax = plt.subplots(figsize=(10, 4))
-      ax.plot(df_raw.index[:500], df_raw[selected_col].head(500), color="#1f77b4", linewidth=1.2)
+      fig.patch.set_facecolor('#0b131f')
+      ax.set_facecolor('#101c2c')
+      ax.tick_params(colors='#94a3b8')
+      ax.xaxis.label.set_color('#d1d5db')
+      ax.yaxis.label.set_color('#d1d5db')
+      ax.title.set_color('#ffffff')
+      for spine in ax.spines.values():
+          spine.set_edgecolor('#1e2d42')
+
+      ax.plot(df_raw.index[:500], df_raw[selected_col].head(500), color="#38bdf8", linewidth=1.2)
       ax.set_title(f"Telemetry Timeline: {selected_col}")
       ax.set_xlabel("Data Sample Index")
       ax.set_ylabel("Sensor Value")
-      ax.grid(True, alpha=0.2)
+      ax.grid(True, alpha=0.2, color='#1e2d42')
       st.pyplot(fig)
   else:
     st.error("Telemetry dataset not loaded.")
@@ -197,15 +282,24 @@ elif page == "Cascading Impact & Tiered Analysis":
           rpm_curve = start_rpm + ((target_rpm - start_rpm) / (1 + np.exp(-0.8 * (steps - 5))))
 
           fig, ax = plt.subplots(figsize=(10, 3.5))
+          fig.patch.set_facecolor('#0b131f')
+          ax.set_facecolor('#101c2c')
+          ax.tick_params(colors='#94a3b8')
+          ax.xaxis.label.set_color('#d1d5db')
+          ax.yaxis.label.set_color('#d1d5db')
+          ax.title.set_color('#ffffff')
+          for spine in ax.spines.values():
+              spine.set_edgecolor('#1e2d42')
+
           ax.plot(steps, rpm_curve, marker='o', color='darkorange', linewidth=2)
           ax.set_title(f"Reaction Wheel Dynamic Acceleration Ramp (Target: {target_rpm:.0f} RPM)")
           ax.set_xlabel("Execution Time Steps")
           ax.set_ylabel("Speed (RPM)")
-          ax.grid(True, alpha=0.3)
+          ax.grid(True, alpha=0.3, color='#1e2d42')
 
           ax.axhline(4500, color="red", linestyle="--", alpha=0.6, label="Upper Limit (4500 RPM)")
-          ax.axhline(1200, color="blue", linestyle="--", alpha=0.6, label="Lower Limit (1200 RPM)")
-          ax.legend()
+          ax.axhline(1200, color="#38bdf8", linestyle="--", alpha=0.6, label="Lower Limit (1200 RPM)")
+          ax.legend(facecolor='#101c2c', edgecolor='#1e2d42', labelcolor='#d1d5db')
 
           st.pyplot(fig)
           st.success(f"Dynamic transition curve generated successfully for Target Speed: {target_rpm:.0f} RPM.")
@@ -258,6 +352,8 @@ elif page == "Cross-Subsystem Cascading Waveform Analysis":
         xaxis_title="Mission Timeline (Seconds)",
         yaxis_title="Normalized Sensor Readings",
         template="plotly_dark",
+        paper_bgcolor='#0b131f',
+        plot_bgcolor='#101c2c',
         height=500,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
