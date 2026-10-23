@@ -1,4 +1,4 @@
-# main.py - Dual-Objective Telemetry Pipeline with Dynamic Thresholds & Expanded Cross-Coupling
+# main.py - Dual-Objective Telemetry Pipeline with Dynamic Thresholds, Real Status Rules & Lock Status
 import os
 import sys
 import time
@@ -99,7 +99,7 @@ class SubsystemPipeline:
     return reduced_data
 
 
-# --- 4. SLIDING WINDOW & DYNAMIC THRESHOLD FUNCTIONS ---
+# --- 4. SLIDING WINDOW & REAL TELEMETRY RULE FUNCTIONS ---
 def create_sliding_windows(data_matrix, seq_len=60):
   windows = []
   for i in range(len(data_matrix) - seq_len):
@@ -113,6 +113,44 @@ def create_sequence_classification_windows(features_matrix, labels_array, seq_le
     X.append(features_matrix[i : i + seq_len])
     y.append(labels_array[i + seq_len])
   return np.array(X), np.array(y)
+
+def check_telemetry_rules(row):
+  """Strictly uses actual telemetry status registers and real sensor limits safely handling data types."""
+  warnings = []
+  
+  # 1. Real Receiver Carrier Lock Status Registers
+  if "TTC_RX-1_CAR_LOCK_STS" in row:
+    lock_status_1 = str(row["TTC_RX-1_CAR_LOCK_STS"]).strip()
+    if lock_status_1 == "UNLOCK":
+      warnings.append("Alert: Receiver 1 Carrier Lock is UNLOCKED")
+
+  if "TTC_RX-2_CAR_LOCK_STS" in row:
+    lock_status_2 = str(row["TTC_RX-2_CAR_LOCK_STS"]).strip()
+    if lock_status_2 == "UNLOCK":
+      warnings.append("Alert: Receiver 2 Carrier Lock is UNLOCKED")
+
+  # 2. Real Thermal Sensor Checks across actual dataframe columns containing 'TMP'
+  for col in row.index:
+    if "TMP" in col and pd.notnull(row[col]):
+      try:
+        val = float(row[col])
+        if val > 85.0: # Standard safe engineering upper bound threshold
+          warnings.append(f"Alert: Thermal Overlimit on {col} ({val} C)")
+      except (ValueError, TypeError):
+        pass # Skip if value is a string that cannot be parsed as a float
+
+  # 3. Real Bus / Line Dropout Check (Checking for hard electrical/voltage failures at 0V)
+  for col in row.index:
+    if "VOLT" in col or "POS_" in col:
+      if pd.notnull(row[col]):
+        try:
+          val = float(row[col])
+          if val == 0.0:
+            warnings.append(f"Alert: Bus Rail Collapse - {col} is at 0V")
+        except (ValueError, TypeError):
+          pass
+
+  return warnings
 
 def compute_dynamic_mse_threshold(model, dataloader, device, k=3.0):
   """Computes dynamic reconstruction error threshold: Mean + k * StdDev across baseline windows."""
@@ -133,7 +171,7 @@ def compute_dynamic_mse_threshold(model, dataloader, device, k=3.0):
   return dynamic_thresh
 
 
-# --- 5A. MODEL 1: UNSUPERVISED LSTM AUTOENCODER (ANOMALY DETECTION) ---
+# --- 5A. MODEL 1: UNSUPERVISED LSTM AUTOENCODER ---
 def train_autoencoder_on_m3(windowed_data, device, epochs=2, batch_size=32):
   tensor_data = torch.tensor(windowed_data, dtype=torch.float32)
   dataset = TensorDataset(tensor_data)
@@ -166,7 +204,7 @@ def train_autoencoder_on_m3(windowed_data, device, epochs=2, batch_size=32):
   return model, dataloader
 
 
-# --- 5B. MODEL 2: SUPERVISED SEQUENCE CLASSIFIER (LOCK / UNLOCK PREDICTION) ---
+# --- 5B. MODEL 2: SUPERVISED SEQUENCE CLASSIFIER (LOCK RISK PREDICTION) ---
 class LockStateLSTMClassifier(nn.Module):
   def __init__(self, seq_len, n_features):
     super(LockStateLSTMClassifier, self).__init__()
@@ -329,7 +367,6 @@ def export_execution_report():
       f.write("Procedure File: xband-m-on.tst\n")
       f.write("==================================================\n")
       for _, row in df.tail(20).iterrows():
-        # Strip literal '.strftime' if present in historical logs
         clean_ts = str(row['Timestamp']).replace('.strftime', '')
         f.write(
             f"[{clean_ts}] COMMAND: {str(row['Telecommand']):<25} |"
@@ -364,15 +401,16 @@ class IntegratedTerminalEngine:
     if not os.path.exists(self.log_file):
       pd.DataFrame(columns=[
           "Timestamp", "Telecommand", "Autoencoder_MSE", "Unlock_Risk_Pct", 
-          "Cascading_Impact_Count", "Status"
+          "Rule_Warnings", "Cascading_Impact_Count", "Status"
       ]).to_csv(self.log_file, index=False)
 
-  def log_audit_event(self, cmd, recon_error, lock_prob, impact_count, status_str):
+  def log_audit_event(self, cmd, recon_error, lock_prob, rule_warnings_str, impact_count, status_str):
     new_row = {
         "Timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "Telecommand": cmd,
         "Autoencoder_MSE": round(recon_error, 5),
         "Unlock_Risk_Pct": round(lock_prob * 100, 2),
+        "Rule_Warnings": rule_warnings_str,
         "Cascading_Impact_Count": impact_count,
         "Status": status_str
     }
@@ -383,10 +421,8 @@ class IntegratedTerminalEngine:
   def execute_send_check_loop(self, command_str):
     print(f"\n[SEND] Transmitting Telecommand: {command_str}")
     
-    # Gradual parameter ramp simulation & limit checks
     simulate_gradual_command_ramps(command_str)
 
-    # Orbital timing breakdown
     delay_metrics = compute_command_execution_delay("LEO", 550)
     print(f"[UPLINK] RF Propagation Delay : {delay_metrics['Propagation (ms)']} ms")
     print(f"[OBC]    Command Decoding      : {delay_metrics['OBC Processing (ms)']} ms")
@@ -394,7 +430,7 @@ class IntegratedTerminalEngine:
     print(f"[TIMING] Total Execution Delay  : {delay_metrics['Total Latency (ms)']} ms")
     time.sleep(0.3)
 
-    print(f"[CHECK] Running Dual-Model Diagnostics & Expanded Dependency Trace (Depth 4)...")
+    print(f"[CHECK] Running Dual-Model Diagnostics & Real Status Rule Checks...")
     
     self.autoencoder.eval()
     self.classifier.eval()
@@ -423,6 +459,12 @@ class IntegratedTerminalEngine:
       plt.close()
 
     time.sleep(0.4)
+    
+    # Run real status register checks on a random sample row from raw dataframe
+    sample_row = self.raw_df.sample(n=1).iloc[0]
+    rule_warnings = check_telemetry_rules(sample_row)
+    rule_warnings_str = " | ".join(rule_warnings) if rule_warnings else "None"
+
     cascade_summary = ""
     impact_count = 0
     if self.mapper and hasattr(self.mapper, "trace_cascading_impact"):
@@ -439,25 +481,35 @@ class IntegratedTerminalEngine:
     is_anomalous = recon_error > self.dynamic_threshold
     lock_risk_threshold = 0.50
     is_lock_risk = lock_prob > lock_risk_threshold
+    has_rule_violations = len(rule_warnings) > 0
 
-    if not is_anomalous and not is_lock_risk:
+    if not is_anomalous and not is_lock_risk and not has_rule_violations:
       status_str = "HEALTHY & LOCKED"
-      print(f"[CHECKED] Status: {status_str} (MSE: {recon_error:.5f} [Dyn Thresh: {self.dynamic_threshold:.5f}] | Unlock Risk: {lock_prob*100:.1f}%{cascade_summary})")
+      print(f"[CHECKED] Status: {status_str}")
+      print(f"  -> Reconstruction MSE : {recon_error:.5f} (Dynamic Threshold: {self.dynamic_threshold:.5f}) -> [NOMINAL]")
+      print(f"  -> Receiver Unlock Risk : {lock_prob*100:.1f}% -> [LOCKED]")
+      print(f"  -> Status Flag Checks   : ALL NOMINAL{cascade_summary}")
     else:
+      status_str = "RISK / ANOMALY DETECTED"
+      print(f"[ALERT] Status: {status_str}")
+      print(f"  -> Reconstruction MSE : {recon_error:.5f} (Dynamic Threshold: {self.dynamic_threshold:.5f})")
       if is_anomalous:
-        status_str = "ANOMALY DETECTED"
-        print(f"[WARNING] Dynamic Anomaly Triggered! MSE ({recon_error:.5f}) exceeded threshold ({self.dynamic_threshold:.5f}){cascade_summary}")
+        print(f"     [!] WARNING: MSE exceeded threshold!")
+      print(f"  -> Receiver Unlock Risk : {lock_prob*100:.1f}%")
       if is_lock_risk:
-        status_str = "LOSS OF LOCK RISK"
-        print(f"[ALERT] High Probability of Receiver Loss of Lock! (Risk: {lock_prob*100:.1f}%)")
+        print(f"     [!] WARNING: High risk of receiver loss of lock!")
+      if has_rule_violations:
+        print(f"     [!] HARDWARE / STATUS ALERTS: {rule_warnings_str}")
+      if cascade_summary:
+        print(f"  -> {cascade_summary}")
 
-    self.log_audit_event(command_str, recon_error, lock_prob, impact_count, status_str)
+    self.log_audit_event(command_str, recon_error, lock_prob, rule_warnings_str, impact_count, status_str)
     export_execution_report()
     print(f"[AUDIT] Telecommand logged and execution report updated successfully.")
 
 # --- 10. MAIN ORCHESTRATION WORKFLOW ---
 def run_pipeline():
-  print("Initializing URSC Dual-Objective Pipeline with Dynamic Thresholding & Cross-Coupling...")
+  print("Initializing URSC Pipeline with Dynamic Thresholds, Real Status Rules & Lock Classification...")
 
   subsystem_name = "IOSYS"
 
@@ -477,13 +529,13 @@ def run_pipeline():
 
   trained_autoencoder, train_loader = train_autoencoder_on_m3(windowed_data, device, epochs=2)
   trained_classifier = train_lock_classifier_on_m3(X_cls, y_cls, device, epochs=2)
-
+  
   dynamic_threshold = compute_dynamic_mse_threshold(trained_autoencoder, train_loader, device, k=3.0)
 
   plot_autoencoder_reconstruction(trained_autoencoder, windowed_data, device, sample_idx=10, feature_idx=0)
 
   print("\n" + "="*50)
-  print("SPACE STATION OPERATOR TERMINAL (DYNAMIC THRESHOLDS & CROSS-COUPLING ACTIVE)")
+  print("SPACE STATION OPERATOR TERMINAL (REAL STATUS REGISTERS & DYNAMIC THRESHOLDS)")
   print("Connected to telemetry file, models, depth-4 dependency mapper, and CSV logger.")
   print("Type telecommands (e.g., 'TC_EXEC_CMD 1', 'SET_RW_SPEED 1500', 'SET_RW_SPEED 800', 'TTC1_ON') or type 'exit' to quit.")
   print("="*50 + "\n")

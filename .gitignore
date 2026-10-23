@@ -32,3 +32,7 @@ __pycache__/
 .idea/
 venv/
 env/
+
+# Ignore telemetry test text files and datasets
+*.txt
+iosys_test*
